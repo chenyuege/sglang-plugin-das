@@ -3622,3 +3622,10 @@ Channel FP8 依赖配套 adapter 的 DeepEP 量化粒度透传。上述环境还
 
 本轮浏览器截图、交互与窄屏复核未执行：浏览器工具的 URL 安全策略拒绝 `file://` 协议。已执行导览重建与快照检查，未将结构检查记作截图验收。
 DTK26.10/Python3.12 镜像中的真实插件发现、构造和 AROUND 分发已通过：两组八 rank 的 Q/K 共 32 项逐元素匹配原生；同一 Graph 更换输入后重放两组 Q/K，也均逐元素匹配。FP32 canonical cache 对象未变，typed memo 为 BF16，关闭开关后的构造保持原分支。记录为任务产物 `rope-runtime-v4.json`；固定参考和捕获哈希见 adapter-das `docs/glm5.3-w4a8-attention-alignment.json`。offsets 与融合 KV-store 保留原语义，但本轮组件不声称覆盖这些调用。移除观测后的六组模型数值合同仍待复测；组件通过不等于模型精度通过。
+
+
+## 2026-11-19 nmz16 Qwen3.6-35B E4M3 KV Prefill
+
+使用 DTK 26.10 插件镜像、SGLang v0.5.22、adapter release `bcec3e0`、TP4。Graph On / Off 均在第一次真实 Prefill 进入 FA3 的 varlen 分支时触发 `NameError: _current_max_seq_len_k`。release backport `708a332` 留下了一个没有生产者的变量引用。调用方省略 `max_seqlen_k` 时，继续沿用页表列数乘页尺寸的上界。显式长度照常透传，保留 BSHD / BHSD 和原有 vendor 分发。
+
+真实 wrapper 的 CPU 探针替换 vendor 算子，覆盖 E4M3 KV 两种布局、显式和省略的最大长度。修复前复现相同 NameError，修复后检查传入 wheel 的参数。整模、性能和精度仍待 GPU 复验。
