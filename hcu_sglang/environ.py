@@ -16,6 +16,13 @@ _ENV_SPECS: dict[str, tuple[type, Any]] = {
     "SGLANG_QWEN4_SPLIT_HC_MIX": (EnvBool, False),
     "SGLANG_QWEN4_FLAT_STATE_SCATTER": (EnvBool, False),
     "SGLANG_QWEN4_PREFILL_DIAGNOSTICS": (EnvBool, False),
+    "SGLANG_QWEN4_PREFILL_QSA_IMPL": (EnvStr, "triton"),
+    "SGLANG_HCU_QSA_PREFILL_LOGITS_MIB": (EnvInt, 0),
+    "SGLANG_HCU_QSA_PREFILL_KEY_SPAN": (EnvInt, 0),
+    "SGLANG_HCU_QSA_PREFILL_TP_ROWS": (EnvInt, 0),
+    "SGLANG_HCU_PD_PREFILL_DRAIN_MODE": (EnvStr, "off"),
+    "SGLANG_HCU_PREFILL_MIXED_TIMEOUT": (EnvBool, False),
+    "SGLANG_QWEN4_PLE_PREFILL_INPLACE_SILU": (EnvBool, False),
     "SGLANG_ENABLE_DP_GATHER_INT8": (EnvBool, False),
     "SGLANG_PLE_ETP_REDUCE_SCATTER": (EnvBool, True),
     "SGLANG_PLE_ETP_REDUCE_SCATTER_MIN_TOKENS": (EnvInt, 2048),
@@ -26,6 +33,9 @@ _ENV_SPECS: dict[str, tuple[type, Any]] = {
     'SGLANG_PD_HIDDEN_RECV_POOL_TOKENS': (EnvInt, -1),
     "SGLANG_ENABLE_HICACHE_SWA_TAIL_ONLY_BACKUP": (EnvBool, False),
     "SGLANG_ENABLE_CP_V2": (EnvBool, False),
+    "SGLANG_HCU_W8A8_USE_LIGHTOP": (EnvBool, False),
+    "SGLANG_HCU_GLM_CT_BF16_ROUTER": (EnvBool, False),
+    "SGLANG_HCU_USE_LIGHTOP_ROPE": (EnvBool, False),
     "SGLANG_LIGHTOP_KVALLOC_KERNEL": (EnvBool, False),
     "SGLANG_USE_FUSED_SILU_MUL_CLAMP_QUANT": (EnvBool, False),
     'SGLANG_EXPERIMENTAL_LPLB_STATIC_PROBS': (EnvStr, None),
@@ -45,6 +55,15 @@ _ENV_SPECS: dict[str, tuple[type, Any]] = {
     "SGLANG_FORCE_AITER_MOE_C": (EnvBool, False),
     "SGLANG_DSPARK_FORCE_W4A8_TPMOE_BACKEND": (EnvStr, None),
     "SGLANG_NSA_MQA_LOGITS_MEMORY_BUDGET_GB": (EnvFloat, None),
+    "SGLANG_DSA_HCU_MQA_LOGITS_WORKSPACE_GB": (EnvFloat, 2.0),
+    "SGLANG_DSA_MQA_SPLIT_BY_SEQ": (EnvBool, False),
+    "SGLANG_DSA_MQA_SPLIT_MIN_SAVED_CELLS": (EnvInt, 2_000_000),
+    "SGLANG_DSA_ENABLE_MTP_PRECOMPUTE_METADATA": (EnvBool, True),
+    "SGLANG_DSA_HCU_USE_INT8_MQA_LOGITS": (EnvBool, True),
+    "SGLANG_DSA_HCU_USE_LIGHTOP_DECODE_GATHER": (EnvBool, True),
+    "SGLANG_DSA_HCU_USE_TRITON_PAGED_MQA": (EnvBool, False),
+    "SGLANG_DSA_KPOOL_AITER_TOPK": (EnvBool, False),
+    "SGLANG_DSA_KPOOL_LIGHTOP_TOPK": (EnvBool, False),
     "SGLANG_HCU_TOPK_V2_PAGED": (EnvBool, False),
     'SGLANG_DSV4_COMPRESS_RLC': (EnvBool, False),
     'SGLANG_DSV4_FP4_LOGITS_BUDGET_MB': (EnvInt, 2048),
@@ -84,7 +103,15 @@ _ENV_SPECS: dict[str, tuple[type, Any]] = {
     "SGLANG_HCU_MEGA_MOE_RUNTIME": (EnvStr, "deep_gemm"),
     "SGLANG_K3_DENSE_MLP_ATTN_TP": (EnvBool, False),
     "SGLANG_K3_SHARED_EXPERTS_ATTN_TP": (EnvBool, False),
-    "SGLANG_KV_LAYOUT_HCU_FA": (EnvBool, True),
+    # HCU FA page-major KV layout: opt-in only. 2026-11 reversed the 2025
+    # default — official pool layouts (token-major 3D / official paged) are
+    # the default now; this layout stays for perf A/B with the vllm_-prefixed
+    # HCU FA attention kernels that consume it.
+    "SGLANG_KV_LAYOUT_HCU_FA": (EnvBool, False),
+    # Fork-source JIT overlay: opt-in only. The adapter already owns DTK
+    # compile-time shims for official sources; the overlay's global header
+    # shadowing breaks official-source JIT builds in stacked runs.
+    "SGLANG_HCU_JIT_OVERLAY": (EnvBool, False),
     "SGLANG_LIGHTOP_TOPK": (EnvBool, False),
     "SGLANG_NPU_FUSED_MOE_MODE": (EnvInt, 1),
     "SGLANG_OPT_DEEPGEMM_MEGA_MOE_USE_FP4_ACTS": (EnvBool, False),

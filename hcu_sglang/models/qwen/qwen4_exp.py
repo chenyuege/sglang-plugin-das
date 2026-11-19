@@ -204,6 +204,17 @@ def around_load_weights(original, model, weights, *, mtp=False):
                 target.copy_(source.to(device=target.device, dtype=target.dtype))
             loaded.add(match[1]+".ngram_embedding."+field)
     result = original(model, stream())
+    # Scale tensors are copied straight into the CPU buffers (shard
+    # slices above, the official non-sharded loader below), so the
+    # construction-time GPU replica of a scalar scale would keep its
+    # init value 1 while _scale_ple_embeddings prefers the replica --
+    # a scale!=1 checkpoint would dequantize with 1. Refresh every
+    # replica now, before warmup/graph capture; reloads re-enter here.
+    for _, emb in model.named_modules():
+        if isinstance(emb, ple.Qwen4ExpPinnedHostEmbedding):
+            replica = getattr(emb, "_device_scalar_scale", None)
+            if replica is not None and replica.shape == emb.weight_scale.shape:
+                replica.copy_(emb.weight_scale)
     return result | loaded
 
 
@@ -315,8 +326,9 @@ def after_load_batch(result, runner, *args, **kwargs):
 def register_hooks():
     if not is_hcu():
         return
-    from hcu_sglang.models.qwen import ple, qsa, qsa_kv, qsa_prefill, qwen4_exp_mtp, fla_prefill, hc_mix, state_scatter
+    from hcu_sglang.models.qwen import ple, qsa, qsa_kv, qsa_prefill, qsa_tuning, qsa_tp_rows, qwen4_exp_mtp, fla_prefill, hc_mix, state_scatter
     from sglang.srt.plugins.hook_registry import HookRegistry, HookType
+    from hcu_sglang.models.qwen import ple_activation
     def register(target, fn, kind=HookType.AROUND):
         HookRegistry.register(target, fn, kind)
     register("sglang.srt.layers.hyperconnection.fused_hc_mix", hc_mix.around_fused_hc_mix)
@@ -332,6 +344,7 @@ def register_hooks():
     register("sglang.srt.models.qwen4_exp._MixStreams.__call__", around_mix_streams)
     register("sglang.srt.models.qwen4_exp.Qwen4ExpForConditionalGeneration.forward", after_conditional_forward, HookType.AFTER)
     register("sglang.srt.models.qwen4_exp.Qwen4ExpPLELayer.start_prefetch", around_start_prefetch)
+    register("sglang.srt.models.qwen4_exp.Qwen4ExpPLELayer._short_conv", ple_activation.around_short_conv)
     register("sglang.srt.models.qwen4_exp.Qwen4ExpPLELayer._consume_prefetched_embeddings", consume_prefetched, HookType.REPLACE)
     register("sglang.srt.models.qwen4_exp.Qwen4ExpForConditionalGeneration.load_weights", around_load_weights)
     register("sglang.srt.models.qwen4_exp_mtp.Qwen4ExpForCausalLMMTP.load_weights", around_mtp_load_weights)
@@ -346,6 +359,10 @@ def register_hooks():
     register("sglang.srt.model_executor.runner.decode_cuda_graph_runner.DecodeCudaGraphRunner.load_batch", after_load_batch, HookType.AFTER)
     for name in ("project_qk", "apply_rope"):
         register("sglang.srt.layers.attention.qsa.qsa_indexer.QSAIndexer."+name, getattr(qsa, name), HookType.REPLACE)
+    register("sglang.srt.layers.attention.qsa.metadata.build_pending_ring_slots", qsa.around_pending_ring_slots)
+    register("sglang.srt.layers.attention.qsa.qsa_indexer._qsa_prefill_row_chunk_size", qsa_tuning.around_row_chunk_size)
+    register("sglang.srt.layers.attention.qsa.qsa_indexer.qsa_mqa_prefill", qsa_tuning.around_mqa_prefill)
+    register("sglang.srt.layers.attention.qsa.qsa_indexer.QSAIndexer.select_prefill_tokens", qsa_tp_rows.around_select_prefill_tokens)
     register("sglang.srt.layers.attention.qwen_sparse_attn_backend.QwenSparseAttnBackend._metadata_from_forward_batch", qsa.after_metadata, HookType.AFTER)
     register("sglang.srt.layers.attention.qwen_sparse_attn_backend.QwenSparseAttnBackend.forward_extend", qsa_prefill.around_forward_extend)
     register("sglang.srt.model_executor.forward_batch_info.ForwardBatch._compute_mrope_positions_extend", qsa_prefill.around_mrope_extend)

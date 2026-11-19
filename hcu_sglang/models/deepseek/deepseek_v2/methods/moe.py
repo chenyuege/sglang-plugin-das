@@ -79,6 +79,15 @@ def __init__(
 
     self.config = config
     self.layer_id = layer_id
+    from sglang.srt.configs.model_config import is_glm_moe_dsa
+
+    if (
+        C._is_hcu
+        and is_glm_moe_dsa(config)
+        and not N0.envs.SGLANG_ROCM_USE_MULTI_STREAM.get()
+    ):
+        alt_stream = None
+        routed_quant_stream = None
     self.alt_stream = alt_stream
     self.routed_quant_stream = routed_quant_stream
     self.is_nextn = is_nextn
@@ -459,6 +468,7 @@ def forward(
             and hidden_states.shape[0] > 0
             and N0.get_is_capture_mode()
             and not N0.is_in_breakable_cuda_graph()
+            and not C._is_hcu
         ):
             return self.forward_normal_dual_stream(
                 hidden_states,

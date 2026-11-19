@@ -34,7 +34,9 @@ _note_fa.counts = {}
 def _layout_enabled() -> bool:
     from sglang.srt.utils import get_bool_env_var
 
-    return get_bool_env_var("SGLANG_KV_LAYOUT_HCU_FA", default="true")
+    # default mirrors hcu_sglang.environ (single source): official layout
+    # unless the HCU FA perf-A/B path is explicitly requested.
+    return get_bool_env_var("SGLANG_KV_LAYOUT_HCU_FA", default="false")
 
 
 def is_native_fp8(dtype: torch.dtype) -> bool:
@@ -121,13 +123,33 @@ def flash_attn_with_kvcache(
     )
 
     k_cache, v_cache = _restore_hcu_cache_layout(k_cache, v_cache)
-    if _layout_enabled() and max_seqlen_q is not None and max_seqlen_q > 1:
+
+    # Varlen calls (prefill / MTP verify carry cu_seqlens_q) must go
+    # through the wheel's varlen entry for both KV layouts: the paged
+    # entry has no cu_seqlens parameter, and viewing a packed q to
+    # [B,1,H,D] makes the wrapper classify S > 1 as mtp packing (its PA
+    # kernel then faults). The varlen entry takes the pool plus
+    # block_table directly and handles both page layouts (pa_layout).
+    if cu_seqlens_q is not None:
+        if _layout_enabled():
+            page_size = k_cache.shape[2]  # [NP, H, PS, D]
+        else:
+            page_size = k_cache.shape[1]  # [NP, PS, H, D]
+        if max_seqlen_k is None:
+            max_seqlen_k = _current_max_seq_len_k or None
         page_capacity = (
-            page_table.shape[1] * k_cache.shape[2]
+            page_table.shape[1] * page_size
             if max_seqlen_k is None and page_table is not None
             else max_seqlen_k
         )
-        _note_fa("fa_varlen_bhsd")
+        # The wheel takes both page layouts; declare the one actually
+        # carried: BHSD pages with the HCU layout flag ([NP, H, PS, D]),
+        # BSHD pages on the default official pool ([NP, PS, H, D]). A
+        # hard-coded "bhsd" mislabels the page and head axes on the
+        # default path ([4,64,2,16] read as 64 heads / page 2) and the
+        # kernel then attends to wrong keys/positions.
+        kv_layout = "bhsd" if _layout_enabled() else "bshd"
+        _note_fa("fa_varlen_" + kv_layout)
         result = hcu_flash_attn_varlen_func(
             q=q,
             k=k_cache,
@@ -144,7 +166,7 @@ def flash_attn_with_kvcache(
             q_descale=q_descale,
             k_descale=k_descale,
             v_descale=v_descale,
-            layout="bhsd",
+            layout=kv_layout,
         )
         return _apply_out(result, out, return_softmax_lse)
 
